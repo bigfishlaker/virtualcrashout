@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arena Photon Trade</title>
+  <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <style>
+    body {
+      background: #000;
+      color: #ff69b4;
+      font-family: monospace;
+      margin: 0;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    h1 {
+      font-size: 2.5rem;
+      margin-bottom: 1rem;
+      text-align: center;
+    }
+
+    input, button, select {
+      font-family: monospace;
+      font-size: 1rem;
+      margin: 0.5rem;
+      padding: 0.7rem;
+      border: 2px solid #ff69b4;
+      background: #111;
+      color: #ff69b4;
+    }
+
+    button:hover {
+      background: #ff69b4;
+      color: black;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 500px;
+    }
+
+    #status {
+      margin-top: 2rem;
+      color: #0f0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Arena Photon Trade</h1>
+  <div class="container">
+    <button onclick="connectWallet()">Connect Wallet</button><br>
+
+    <input id="tokenAddress" type="text" placeholder="Token address" size="42"><br>
+    <input id="amount" type="number" placeholder="Amount to buy (in AVAX)"><br>
+    <button onclick="getQuote()">Get ParaSwap Quote</button>
+    <button onclick="executeTrade()">Buy Token</button>
+
+    <div id="status"></div>
+  </div>
+
+  <script>
+    let provider, signer;
+
+    async function connectWallet() {
+      if (!window.ethereum) return alert("MetaMask required");
+      provider = new ethers.providers.Web3Provider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      signer = provider.getSigner();
+      document.getElementById('status').textContent = "Wallet connected: " + await signer.getAddress();
+    }
+
+    async function getQuote() {
+      const tokenAddress = document.getElementById('tokenAddress').value.trim();
+      const amount = parseFloat(document.getElementById('amount').value.trim());
+      if (!tokenAddress || !amount) return alert("Enter both token address and amount");
+
+      const avaxWei = ethers.utils.parseUnits(amount.toString(), 18);
+      const from = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE"; // Native AVAX
+      const to = tokenAddress;
+
+      const url = `https://apiv5.paraswap.io/prices/?srcToken=${from}&destToken=${to}&amount=${avaxWei}&network=43114&side=BUY`;
+      const res = await fetch(url);
+      const data = await res.json();
+
+      if (data && data.priceRoute) {
+        document.getElementById('status').textContent = `Expected Amount: ${data.priceRoute.destAmount} wei`;
+      } else {
+        document.getElementById('status').textContent = "Quote failed";
+      }
+    }
+
+    async function executeTrade() {
+      const tokenAddress = document.getElementById('tokenAddress').value.trim();
+      const amount = parseFloat(document.getElementById('amount').value.trim());
+      const avaxWei = ethers.utils.parseUnits(amount.toString(), 18);
+      const user = await signer.getAddress();
+
+      const txBuildUrl = `https://apiv5.paraswap.io/transactions/43114?ignoreChecks=true`;
+      const body = {
+        srcToken: "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+        destToken: tokenAddress,
+        srcAmount: avaxWei.toString(),
+        userAddress: user,
+        slippage: 2,
+        partner: "virtualcrashout"
+      };
+
+      const res = await fetch(txBuildUrl, {
+        method: "POST",
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      const tx = await res.json();
+      if (!tx?.to) return document.getElementById('status').textContent = "Trade setup failed.";
+
+      try {
+        const txResponse = await signer.sendTransaction({
+          to: tx.to,
+          data: tx.data,
+          value: tx.value ? ethers.BigNumber.from(tx.value) : undefined
+        });
+        document.getElementById('status').textContent = `Trade sent: ${txResponse.hash}`;
+      } catch (err) {
+        console.error(err);
+        document.getElementById('status').textContent = "Trade failed";
+      }
+    }
+  </script>
+</body>
+</html>
