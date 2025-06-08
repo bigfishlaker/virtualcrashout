@@ -1,63 +1,195 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>virtualcrashout</title>
-  <style>
-    body {
-      margin: 0;
-      background: #000;
-      color: #0f0;
-      font-family: monospace;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 2rem;
+<script>
+  let provider, signer, connected = false, userAvaxBalance = 0;
+
+  function toggleWalletDropdown() {
+    const dropdown = document.getElementById("walletDropdown");
+    dropdown.style.display = dropdown.style.display === "block" ? "none" : "block";
+  }
+
+  async function connectWallet() {
+    if (typeof window.ethereum !== 'undefined') {
+      provider = new ethers.providers.Web3Provider(window.ethereum);
+      await provider.send("eth_requestAccounts", []);
+      signer = provider.getSigner();
+      const address = await signer.getAddress();
+      const balance = await provider.getBalance(address);
+      userAvaxBalance = parseFloat(ethers.utils.formatEther(balance));
+      document.getElementById('avaxBalance').textContent = userAvaxBalance.toFixed(4);
+      document.getElementById('walletInfo').textContent = `Connected: ${address.slice(0, 6)}...${address.slice(-4)} | ${userAvaxBalance.toFixed(4)} AVAX`;
+      document.getElementById('walletToggle').textContent = 'Wallet Connected';
+      updateTokenBalance();
+      connected = true;
+    } else {
+      document.getElementById('walletInfo').textContent = 'No wallet detected';
+    }
+  }
+
+  function disconnectWallet() {
+    provider = null;
+    signer = null;
+    connected = false;
+    userAvaxBalance = 0;
+    document.getElementById('walletInfo').textContent = 'Disconnected';
+    document.getElementById('tokenBalance').textContent = '0';
+    document.getElementById('walletToggle').textContent = 'Connect Wallet';
+  }
+
+  function refreshWallet() {
+    if (signer) connectWallet();
+  }
+
+  function applyPreset(preset) {
+    let gas, priority, slip;
+    if (preset === 'safe') {
+      gas = 100; priority = 1; slip = 0.5;
+    } else if (preset === 'fastor') {
+      gas = 300; priority = 5; slip = 2;
+    } else if (preset === 'fahked') {
+      gas = 500; priority = 15; slip = 20;
+    }
+    document.getElementById('maxFeeSlider').value = gas;
+    document.getElementById('priorityFeeSlider').value = priority;
+    document.getElementById("maxFeeValue").textContent = gas;
+    document.getElementById("priorityFeeValue").textContent = priority;
+    document.getElementById('slippage').value = slip;
+  }
+
+  function setPercent(pct) {
+    if (!userAvaxBalance) return;
+    const amt = userAvaxBalance * (pct / 100);
+    document.getElementById('amount').value = amt.toFixed(4);
+  }
+
+  async function setSellPercent(pct) {
+    const tokenAddress = document.getElementById('customToken').value.trim();
+    if (!provider || !tokenAddress) return;
+
+    const erc20 = new ethers.Contract(tokenAddress, [
+      'function balanceOf(address) view returns (uint256)',
+      'function decimals() view returns (uint8)'
+    ], provider);
+
+    try {
+      const user = await signer.getAddress();
+      const balance = await erc20.balanceOf(user);
+      const decimals = await erc20.decimals();
+      const amount = balance.mul(pct).div(100);
+      const formatted = parseFloat(ethers.utils.formatUnits(amount, decimals)).toFixed(6);
+      document.getElementById('amount').value = formatted;
+    } catch (e) {
+      console.error('Could not fetch token balance:', e);
+    }
+  }
+
+  async function updateTokenBalance() {
+    const tokenAddress = document.getElementById('customToken').value.trim();
+    if (!provider || !tokenAddress) return;
+
+    const erc20 = new ethers.Contract(tokenAddress, [
+      'function balanceOf(address) view returns (uint256)',
+      'function decimals() view returns (uint8)'
+    ], provider);
+
+    try {
+      const user = await signer.getAddress();
+      const balance = await erc20.balanceOf(user);
+      const decimals = await erc20.decimals();
+      const formatted = parseFloat(ethers.utils.formatUnits(balance, decimals)).toFixed(6);
+      document.getElementById('tokenBalance').textContent = formatted;
+    } catch (e) {
+      console.error('Could not update token balance:', e);
+      document.getElementById('tokenBalance').textContent = '0';
+    }
+  }
+
+  async function confirmTrade(type) {
+    document.getElementById('terminalStatus').textContent = '>>> Swapping...';
+    const amt = document.getElementById('amount').value;
+    const token = document.getElementById('customToken').value;
+    const slip = document.getElementById('slippage').value;
+    const slippage = parseFloat(slip) * 100;
+    const chainId = 43114;
+    const from = await signer.getAddress();
+    const amountWei = ethers.utils.parseEther(amt);
+    const deadline = Math.floor(Date.now() / 1000) + 600;
+    const side = type === 'buy' ? 'BUY' : 'SELL';
+
+    let fromToken = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7';
+    const nativeAVAX = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+    try {
+      const testQuote = await fetch(`https://api.paraswap.io/prices?srcToken=${nativeAVAX}&destToken=${token}&amount=${amountWei}&side=${side}&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
+      const testData = await testQuote.json();
+      if (testData?.priceRoute) fromToken = nativeAVAX;
+    } catch (err) {
+      console.warn('Fallback to WAVAX');
     }
 
-    h1 {
-      font-size: 3rem;
-      margin-bottom: 1rem;
+    const toToken = type === 'buy' ? token : nativeAVAX;
+    const response = await fetch(`https://api.paraswap.io/prices?srcToken=${fromToken}&destToken=${toToken}&amount=${amountWei}&side=${side}&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
+    const quote = await response.json();
+
+    if (!quote.priceRoute) {
+      const fallbackRes = await fetch(`https://api.arena.trade/swap?srcToken=${fromToken}&destToken=${toToken}&amount=${amountWei.toString()}&slippage=${slippage}&user=${from}`);
+      const fallbackData = await fallbackRes.json();
+      if (!fallbackData || !fallbackData.to) {
+        document.getElementById('status').textContent = 'No route found. Try different token or amount.';
+        document.body.classList.add('shake');
+        return;
+      }
+      const tx = await signer.sendTransaction({
+        to: fallbackData.to,
+        data: fallbackData.data,
+        value: fallbackData.value ? ethers.BigNumber.from(fallbackData.value) : 0,
+        gasLimit: fallbackData.gas || 300000,
+        maxFeePerGas: ethers.utils.parseUnits(document.getElementById('maxFeeSlider').value, 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits(document.getElementById('priorityFeeSlider').value, 'gwei')
+      });
+      document.getElementById('status').textContent = 'Fallback Trade sent: ' + tx.hash;
+      document.body.style.backgroundImage = "url('https://media.tenor.com/R2C44Dj5NucAAAAd/laker-brady-laker.gif')";
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      setTimeout(() => document.body.style.backgroundImage = '', 1000);
+      setTimeout(() => document.body.classList.remove('cursor-hacked'), 5000);
+      document.body.classList.add('cursor-hacked');
+      return;
     }
 
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1.5rem;
-      width: 100%;
-      max-width: 800px;
+    const txResp = await fetch('https://api.paraswap.io/transactions/43114', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        srcToken: fromToken,
+        destToken: toToken,
+        srcAmount: amountWei.toString(),
+        userAddress: from,
+        slippage: slippage,
+        priceRoute: quote.priceRoute,
+        deadline: deadline,
+      })
+    });
+    const txData = await txResp.json();
+    try {
+      const tx = await signer.sendTransaction({
+        to: txData.to,
+        data: txData.data,
+        value: txData.value ? ethers.BigNumber.from(txData.value) : 0,
+        gasLimit: txData.gas,
+        maxFeePerGas: ethers.utils.parseUnits(document.getElementById('maxFeeSlider').value, 'gwei'),
+        maxPriorityFeePerGas: ethers.utils.parseUnits(document.getElementById('priorityFeeSlider').value, 'gwei')
+      });
+      document.getElementById('status').textContent = 'Trade sent: ' + tx.hash;
+      document.getElementById('terminalStatus').textContent = `>>> Swap confirmed\nTX Hash: ${tx.hash}`;
+      document.body.style.backgroundImage = "url('https://media.tenor.com/R2C44Dj5NucAAAAd/laker-brady-laker.gif')";
+      document.body.style.backgroundSize = 'cover';
+      document.body.style.backgroundPosition = 'center';
+      setTimeout(() => document.body.style.backgroundImage = '', 1000);
+      setTimeout(() => document.body.classList.remove('cursor-hacked'), 5000);
+      document.body.classList.add('cursor-hacked');
+    } catch (e) {
+      console.error(e);
+      document.getElementById('status').textContent = 'Transaction failed';
+      document.getElementById('terminalStatus').textContent = '>>> Error: Transaction failed';
+      document.body.classList.add('shake');
     }
-
-    .link-card {
-      background: #111;
-      padding: 1rem;
-      text-align: center;
-      border: 1px solid #0f0;
-      transition: 0.2s;
-      text-decoration: none;
-      color: #0f0;
-    }
-
-    .link-card:hover {
-      background: #0f0;
-      color: #000;
-    }
-
-    footer {
-      margin-top: 2rem;
-      font-size: 0.9rem;
-      color: #555;
-    }
-  </style>
-</head>
-<body>
-  <h1>virtualcrashout</h1>
-  <div class="grid">
-    <a class="link-card" href="https://example.com" target="_blank">Example Link</a>
-    <a class="link-card" href="https://another.com" target="_blank">Another Site</a>
-    <!-- Add more links here -->
-  </div>
-  <footer>© 2025 virtualcrashout</footer>
-</body>
-</html>
+  }
+</script>
