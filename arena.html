@@ -5,39 +5,18 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Arena Photon Trade</title>
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body {
       background: #000;
       color: #ff69b4;
       font-family: monospace;
-      margin: 0;
       padding: 2rem;
     }
-    header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      width: 100%;
-      padding: 0 2rem;
-    }
-    #walletControls {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      font-size: 0.75rem;
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-    }
-    #walletInfo {
-      color: #ff69b4;
-    }
-    input, button, select {
+    input, button {
       font-family: monospace;
       font-size: 1rem;
-      margin: 0.5rem;
-      padding: 0.7rem;
+      margin: 0.3rem;
+      padding: 0.5rem;
       border: 2px solid #ff69b4;
       background: #111;
       color: #ff69b4;
@@ -46,189 +25,115 @@
       background: #ff69b4;
       color: black;
     }
-    #status {
-      margin-top: 1rem;
+    #quoteDisplay {
+      margin: 1rem 0;
       color: lime;
     }
-    canvas {
-      margin-top: 2rem;
-      max-width: 500px;
-    }
-    #clipboard-preview {
-      font-size: 0.9rem;
-      margin: 0.5rem;
-      color: #888;
-    }
-    iframe {
-      margin-top: 1rem;
-      border: none;
-      width: 100%;
-      height: 500px;
-      max-width: 1000px;
-    }
-    .percent-buttons {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.3rem;
-    }
-    .percent-buttons button {
-      padding: 0.5rem 1rem;
-      font-size: 0.9rem;
-      border-radius: 5px;
-    }
-    #tokenBalanceDisplay {
-      margin: 0.5rem;
-      font-size: 0.9rem;
-      color: #ff69b4;
+    .slider-label {
+      margin: 0.5rem 0 0 0;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Arena Photon Trade</h1>
-  </header>
-  <div id="walletControls">
-    <span id="walletInfo">Not connected</span>
-    <button onclick="connectWallet()">Connect</button>
-    <button onclick="disconnectWallet()">Disconnect</button>
-  </div>
-  <div>
-    <div id="clipboard-preview">Clipboard Address: <span id="copiedAddress">None</span></div>
-    <input id="customToken" type="text" placeholder="Paste token contract address">
-    <button onclick="usePastedAddress()">Use Pasted</button>
-    <br>
-    <input id="amount" type="number" placeholder="Amount">
-    <div id="tokenBalanceDisplay">Token Balance: <span id="tokenBalance">0</span></div>
-    <div class="percent-buttons">
-      <button onclick="setPercent(25)">Buy 25%</button>
-      <button onclick="setPercent(50)">Buy 50%</button>
-      <button onclick="setPercent(75)">Buy 75%</button>
-      <button onclick="setPercent(100)">Buy 100%</button>
-      <button onclick="setSellPercent(5)">Sell 5%</button>
-      <button onclick="setSellPercent(25)">Sell 25%</button>
-      <button onclick="setSellPercent(50)">Sell 50%</button>
-      <button onclick="setSellPercent(75)">Sell 75%</button>
-      <button onclick="setSellPercent(100)">Sell 100%</button>
-    </div>
-    <input id="slippage" type="number" value="2" placeholder="Slippage %">
-    <button onclick="handleBuyNow()">Buy Now</button>
-    <button onclick="handleSellNow()">Sell Now</button>
-    <div id="status"></div>
-    <iframe id="dexChart" src="" style="display:none;"></iframe>
-    <iframe id="arenaFrame" src="" style="display:none; width: 100%; height: 600px; border: none; margin-top: 1rem;"></iframe>
-  </div>
+  <h1>Arena Photon Trade</h1>
+  <input id="customToken" placeholder="Token contract address">
+  <input id="amount" placeholder="Amount">
+  <input id="slippage" placeholder="Slippage %" value="2">
+
+  <div class="slider-label">Max Fee (Gwei)</div>
+  <input type="range" min="50" max="500" value="200" id="maxFeeSlider">
+  <span id="maxFeeValue">200</span>
+
+  <div class="slider-label">Priority Fee (Gwei)</div>
+  <input type="range" min="1" max="50" value="2" id="priorityFeeSlider">
+  <span id="priorityFeeValue">2</span>
+
+  <button onclick="getQuote('buy')">Preview Buy</button>
+  <button onclick="getQuote('sell')">Preview Sell</button>
+  <button onclick="confirmTrade('buy')">Buy Now</button>
+  <button onclick="confirmTrade('sell')">Sell Now</button>
+
+  <div id="quoteDisplay">Quote: N/A</div>
+  <div id="status"></div>
 
   <script>
-    let provider, signer, pastedAddress, currentAvaxBalance = 0, userAddress = '', tokenDecimals = 18;
+    let provider, signer, userAddress;
+    window.addEventListener('load', async () => {
+      if (window.ethereum) {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        userAddress = await signer.getAddress();
+      }
+    });
 
-    async function checkClipboardForAddress() {
+    document.getElementById("maxFeeSlider").oninput = function() {
+      document.getElementById("maxFeeValue").textContent = this.value;
+    }
+    document.getElementById("priorityFeeSlider").oninput = function() {
+      document.getElementById("priorityFeeValue").textContent = this.value;
+    }
+
+    async function getQuote(type) {
+      const token = document.getElementById("customToken").value.trim();
+      const amount = document.getElementById("amount").value.trim();
+      const slippage = document.getElementById("slippage").value;
+      const src = type === 'buy' ? "0x0000000000000000000000000000000000000000" : token;
+      const dest = type === 'buy' ? token : "0x0000000000000000000000000000000000000000";
+
       try {
-        const permission = await navigator.permissions.query({ name: "clipboard-read" });
-        if (permission.state === "granted" || permission.state === "prompt") {
-          const text = await navigator.clipboard.readText();
-          if (/^0x[a-fA-F0-9]{40}$/.test(text)) {
-            pastedAddress = text;
-            document.getElementById("copiedAddress").textContent = text;
-          } else {
-            document.getElementById("copiedAddress").textContent = "No valid address found";
-          }
-        }
-      } catch (err) {
-        document.getElementById("copiedAddress").textContent = "Clipboard access denied";
+        const parsedAmount = ethers.utils.parseUnits(amount, 18).toString();
+        const quoteUrl = `https://apiv5.paraswap.io/prices/?srcToken=${src}&destToken=${dest}&amount=${parsedAmount}&side=${type.toUpperCase()}&network=43114&slippage=${slippage}`;
+        const res = await fetch(quoteUrl);
+        const data = await res.json();
+        document.getElementById("quoteDisplay").textContent = `Quote: ${data.destAmount / (10 ** 18)} tokens`;
+      } catch (e) {
+        document.getElementById("quoteDisplay").textContent = `Quote failed`;
       }
     }
 
-    function usePastedAddress() {
-      if (pastedAddress) {
-        document.getElementById("customToken").value = pastedAddress;
-        const iframe = document.getElementById("dexChart");
-        iframe.src = `https://dexscreener.com/avalanche/${pastedAddress}`;
-        iframe.style.display = "block";
-        fetchTokenBalance(pastedAddress);
-      } else {
-        alert("No valid address copied yet");
-      }
-    }
+    async function confirmTrade(type) {
+      const token = document.getElementById("customToken").value.trim();
+      const amount = document.getElementById("amount").value.trim();
+      const slippage = parseFloat(document.getElementById("slippage").value);
+      const maxFee = document.getElementById("maxFeeSlider").value;
+      const priorityFee = document.getElementById("priorityFeeSlider").value;
 
-    function handleBuyNow() {
-      const tokenAddress = document.getElementById("customToken").value.trim();
-      if (!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) {
-        alert("Enter valid token address");
-        return;
-      }
-      const arenaURL = `https://arena.trade/avalanche/swap?input=AVAX&output=${tokenAddress}`;
-      const iframe = document.getElementById("arenaFrame");
-      iframe.src = arenaURL;
-      iframe.style.display = "block";
-    }
+      const srcToken = type === 'buy' ? "0x0000000000000000000000000000000000000000" : token;
+      const destToken = type === 'buy' ? token : "0x0000000000000000000000000000000000000000";
+      const srcAmount = ethers.utils.parseUnits(amount, 18).toString();
 
-    function handleSellNow() {
-      const tokenAddress = document.getElementById("customToken").value.trim();
-      if (!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) {
-        alert("Enter valid token address");
-        return;
-      }
-      const arenaURL = `https://arena.trade/avalanche/swap?input=${tokenAddress}&output=AVAX`;
-      const iframe = document.getElementById("arenaFrame");
-      iframe.src = arenaURL;
-      iframe.style.display = "block";
-    }
-
-    function setPercent(percent) {
-      if (currentAvaxBalance > 0) {
-        const amt = (currentAvaxBalance * (percent / 100)).toFixed(4);
-        document.getElementById("amount").value = amt;
-      }
-    }
-
-    let currentTokenBalance = 0;
-
-    function setSellPercent(percent) {
-      if (currentTokenBalance > 0) {
-        const sellAmt = (currentTokenBalance * (percent / 100)).toFixed(4);
-        document.getElementById("amount").value = sellAmt;
-      }
-    }
-
-    async function fetchTokenBalance(tokenAddress) {
-      if (!provider || !userAddress) return;
-      const erc20Abi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
-      const contract = new ethers.Contract(tokenAddress, erc20Abi, provider);
       try {
-        const balanceRaw = await contract.balanceOf(userAddress);
-        const decimals = await contract.decimals();
-        tokenDecimals = decimals;
-        currentTokenBalance = parseFloat(ethers.utils.formatUnits(balanceRaw, decimals));
-        document.getElementById("tokenBalance").textContent = currentTokenBalance.toFixed(4);
+        const txRes = await fetch(`https://apiv5.paraswap.io/transactions/43114`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            srcToken,
+            destToken,
+            srcAmount,
+            slippage,
+            userAddress,
+            partner: "arena-photon"
+          })
+        });
+        const txData = await txRes.json();
+
+        const tx = {
+          to: txData.to,
+          data: txData.data,
+          value: ethers.BigNumber.from(txData.value || 0),
+          gasLimit: ethers.BigNumber.from(500000),
+          maxPriorityFeePerGas: ethers.utils.parseUnits(priorityFee, 'gwei'),
+          maxFeePerGas: ethers.utils.parseUnits(maxFee, 'gwei')
+        };
+
+        const sentTx = await signer.sendTransaction(tx);
+        document.getElementById("status").textContent = `Sent: ${sentTx.hash}`;
       } catch (err) {
-        console.error("Error fetching token balance:", err);
+        document.getElementById("status").textContent = `Error: ${err.message}`;
       }
     }
-
-    async function connectWallet() {
-      if (!window.ethereum) return;
-      provider = new ethers.providers.Web3Provider(window.ethereum);
-      await provider.send("eth_requestAccounts", []);
-      signer = provider.getSigner();
-      userAddress = await signer.getAddress();
-      const balance = await provider.getBalance(userAddress);
-      currentAvaxBalance = parseFloat(ethers.utils.formatEther(balance));
-      document.getElementById("walletInfo").textContent = `${userAddress.slice(0, 6)}...${userAddress.slice(-4)} | ${currentAvaxBalance.toFixed(4)} AVAX`;
-    }
-
-    function disconnectWallet() {
-      signer = null;
-      provider = null;
-      currentAvaxBalance = 0;
-      currentTokenBalance = 0;
-      userAddress = '';
-      document.getElementById("walletInfo").textContent = "Not connected";
-      document.getElementById("tokenBalance").textContent = "0";
-    }
-
-    checkClipboardForAddress();
   </script>
 </body>
 </html>
-
 
