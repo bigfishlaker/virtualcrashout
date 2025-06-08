@@ -73,6 +73,7 @@
   <div class="trade-buttons">
     <button onclick="confirmTrade('buy')">BUY NOW</button>
     <button onclick="confirmTrade('sell')">SELL NOW</button>
+    <button onclick="refreshWallet()">↻ Refresh Wallet</button>
   </div>
 
   <input id="slippage" placeholder="Slippage %" value="2">
@@ -111,23 +112,25 @@
   <div id="status"></div>
 
   <script>
-    function setGasProfile(type) {
-      let maxFee = 200, priorityFee = 2;
-      if (type === 'safe') {
-        maxFee = 100;
-        priorityFee = 1;
-      } else if (type === 'fast') {
-        maxFee = 300;
-        priorityFee = 5;
-      } else if (type === 'max') {
-        maxFee = 500;
-        priorityFee = 10;
+    let provider, signer;
+
+    async function refreshWallet() {
+      if (typeof window.ethereum !== 'undefined') {
+        provider = new ethers.providers.Web3Provider(window.ethereum);
+        await provider.send("eth_requestAccounts", []);
+        signer = provider.getSigner();
+        const address = await signer.getAddress();
+        const balance = await provider.getBalance(address);
+        const avax = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
+        document.getElementById('walletInfo').textContent = `Connected: ${address.slice(0, 6)}...${address.slice(-4)} | ${avax} AVAX`;
+      } else {
+        document.getElementById('walletInfo').textContent = 'MetaMask not detected';
       }
-      document.getElementById('maxFeeSlider').value = maxFee;
-      document.getElementById('priorityFeeSlider').value = priorityFee;
-      document.getElementById("maxFeeValue").textContent = maxFee;
-      document.getElementById("priorityFeeValue").textContent = priorityFee;
     }
+
+    window.addEventListener('load', async () => {
+      await refreshWallet();
+    });
 
     function applyPreset(preset) {
       let gas, priority, slip;
@@ -147,3 +150,4 @@
   </script>
 </body>
 </html>
+
