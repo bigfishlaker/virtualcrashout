@@ -25,7 +25,7 @@
       background: #ff69b4;
       color: black;
     }
-    #quoteDisplay, #status, #walletInfo, #clipboard-preview, #tokenBalanceDisplay {
+    #quoteDisplay, #status, #clipboard-preview, #tokenBalanceDisplay {
       margin: 1rem 0;
       color: lime;
     }
@@ -54,17 +54,47 @@
       padding: 1rem 2rem;
       font-size: 1.2rem;
     }
-    .profile-buttons {
-      margin: 1rem 0;
-    }
     .preset-group {
       margin: 1rem 0;
+    }
+    #walletToggle {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: #111;
+      border: 2px solid #ff69b4;
+      color: #ff69b4;
+      padding: 0.5rem;
+      z-index: 1000;
+      cursor: pointer;
+    }
+    #walletDropdown {
+      position: absolute;
+      top: 3.5rem;
+      right: 1rem;
+      background: #111;
+      border: 2px solid #ff69b4;
+      color: #ff69b4;
+      padding: 0.5rem;
+      z-index: 999;
+      display: none;
+    }
+    #walletDropdown button {
+      display: block;
+      width: 100%;
+      margin-top: 0.5rem;
     }
   </style>
 </head>
 <body>
+  <div id="walletToggle" onclick="toggleWalletDropdown()">Connect Wallet</div>
+  <div id="walletDropdown">
+    <div id="walletInfo">Not connected</div>
+    <button onclick="connectWallet()">Connect</button>
+    <button onclick="disconnectWallet()">Disconnect</button>
+  </div>
+
   <h1>Arena Photon Trade</h1>
-  <div id="walletInfo">Not connected</div>
   <div id="clipboard-preview">Clipboard Address: <span id="copiedAddress">None</span></div>
   <input id="customToken" placeholder="Token contract address">
   <input id="amount" placeholder="Amount">
@@ -112,9 +142,14 @@
   <div id="status"></div>
 
   <script>
-    let provider, signer;
+    let provider, signer, connected = false;
 
-    async function refreshWallet() {
+    function toggleWalletDropdown() {
+      const dropdown = document.getElementById('walletDropdown');
+      dropdown.style.display = dropdown.style.display === 'block' ? 'none' : 'block';
+    }
+
+    async function connectWallet() {
       if (typeof window.ethereum !== 'undefined') {
         provider = new ethers.providers.Web3Provider(window.ethereum);
         await provider.send("eth_requestAccounts", []);
@@ -123,14 +158,24 @@
         const balance = await provider.getBalance(address);
         const avax = parseFloat(ethers.utils.formatEther(balance)).toFixed(4);
         document.getElementById('walletInfo').textContent = `Connected: ${address.slice(0, 6)}...${address.slice(-4)} | ${avax} AVAX`;
+        document.getElementById('walletToggle').textContent = 'Wallet Connected';
+        connected = true;
       } else {
-        document.getElementById('walletInfo').textContent = 'MetaMask not detected';
+        document.getElementById('walletInfo').textContent = 'No wallet detected';
       }
     }
 
-    window.addEventListener('load', async () => {
-      await refreshWallet();
-    });
+    function disconnectWallet() {
+      provider = null;
+      signer = null;
+      connected = false;
+      document.getElementById('walletInfo').textContent = 'Disconnected';
+      document.getElementById('walletToggle').textContent = 'Connect Wallet';
+    }
+
+    function refreshWallet() {
+      if (signer) connectWallet();
+    }
 
     function applyPreset(preset) {
       let gas, priority, slip;
