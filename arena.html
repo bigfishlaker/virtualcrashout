@@ -117,25 +117,25 @@
   </div>
 
   <div class="percent-buttons">
-  <button onclick="setPercent(25)">Buy 25%</button>
-  <button onclick="setPercent(50)">Buy 50%</button>
-  <button onclick="setPercent(75)">Buy 75%</button>
-  <button onclick="setPercent(100)">Buy 100%</button>
-  <button onclick="setSellPercent(5)">Sell 5%</button>
-  <button onclick="setSellPercent(25)">Sell 25%</button>
-  <button onclick="setSellPercent(50)">Sell 50%</button>
-  <button onclick="setSellPercent(75)">Sell 75%</button>
-  <button onclick="setSellPercent(100)">Sell 100%</button>
-</div>
+    <button onclick="setPercent(25)">Buy 25%</button>
+    <button onclick="setPercent(50)">Buy 50%</button>
+    <button onclick="setPercent(75)">Buy 75%</button>
+    <button onclick="setPercent(100)">Buy 100%</button>
+    <button onclick="setSellPercent(5)">Sell 5%</button>
+    <button onclick="setSellPercent(25)">Sell 25%</button>
+    <button onclick="setSellPercent(50)">Sell 50%</button>
+    <button onclick="setSellPercent(75)">Sell 75%</button>
+    <button onclick="setSellPercent(100)">Sell 100%</button>
+  </div>
 
   <input id="slippage" placeholder="Slippage %" value="2">
 
   <div class="preset-group">
-  <span>Presets:</span>
-  <button onclick="applyPreset('safe')">Safe</button>
-  <button onclick="applyPreset('fastor')">Fastor</button>
-  <button onclick="applyPreset('fahked')">Fahked</button>
-</div>
+    <span>Presets:</span>
+    <button onclick="applyPreset('safe')">Safe</button>
+    <button onclick="applyPreset('fastor')">Fastor</button>
+    <button onclick="applyPreset('fahked')">Fahked</button>
+  </div>
 
   <div id="quoteDisplay">Quote: N/A</div>
   <div id="status"></div>
@@ -213,24 +213,28 @@
       const token = document.getElementById('customToken').value;
       const slip = document.getElementById('slippage').value;
       const slippage = parseFloat(slip) * 100;
-      let fromToken = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7'; // WAVAX (fallback)
-
-      const nativeAVAX = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-      try {
-        const testQuote = await fetch(`https://api.paraswap.io/prices?srcToken=${nativeAVAX}&destToken=${token}&amount=${amountWei}&side=SELL&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
-        const testData = await testQuote.json();
-        if (testData?.priceRoute) {
-          fromToken = nativeAVAX;
-        }
-      } catch (err) {
-        console.warn('Fallback to WAVAX - native AVAX quote failed');
-      }
-      const toToken = token;
       const chainId = 43114;
       const from = await signer.getAddress();
       const amountWei = ethers.utils.parseEther(amt);
       const deadline = Math.floor(Date.now() / 1000) + 600;
 
+      let fromToken = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7'; // WAVAX fallback
+      const nativeAVAX = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+
+      try {
+        const testQuote = await fetch(`https://api.paraswap.io/prices?srcToken=${nativeAVAX}&destToken=${token}&amount=${amountWei}&side=SELL&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
+        const testData = await testQuote.json();
+        if (testData?.priceRoute) {
+          fromToken = nativeAVAX;
+          console.log('Using native AVAX for swap');
+        } else {
+          console.warn('Fallback to WAVAX - native AVAX has no route');
+        }
+      } catch (err) {
+        console.warn('Native AVAX quote failed, falling back to WAVAX');
+      }
+
+      const toToken = token;
       const response = await fetch(`https://api.paraswap.io/prices?srcToken=${fromToken}&destToken=${toToken}&amount=${amountWei}&side=SELL&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
       const quote = await response.json();
 
@@ -273,5 +277,4 @@
   </script>
 </body>
 </html>
-
 
