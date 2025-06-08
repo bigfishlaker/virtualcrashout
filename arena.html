@@ -213,7 +213,18 @@
       const token = document.getElementById('customToken').value;
       const slip = document.getElementById('slippage').value;
       const slippage = parseFloat(slip) * 100;
-      const fromToken = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7';
+      let fromToken = '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7'; // WAVAX (fallback)
+
+      const nativeAVAX = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+      try {
+        const testQuote = await fetch(`https://api.paraswap.io/prices?srcToken=${nativeAVAX}&destToken=${token}&amount=${amountWei}&side=SELL&network=${chainId}&userAddress=${from}&slippage=${slippage}`);
+        const testData = await testQuote.json();
+        if (testData?.priceRoute) {
+          fromToken = nativeAVAX;
+        }
+      } catch (err) {
+        console.warn('Fallback to WAVAX - native AVAX quote failed');
+      }
       const toToken = token;
       const chainId = 43114;
       const from = await signer.getAddress();
@@ -262,4 +273,5 @@
   </script>
 </body>
 </html>
+
 
