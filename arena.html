@@ -12,7 +12,7 @@
       font-family: monospace;
       padding: 2rem;
     }
-    input, button {
+    input, button, select {
       font-family: monospace;
       font-size: 1rem;
       margin: 0.3rem;
@@ -25,20 +25,64 @@
       background: #ff69b4;
       color: black;
     }
-    #quoteDisplay {
+    #quoteDisplay, #status, #walletInfo, #clipboard-preview, #tokenBalanceDisplay {
       margin: 1rem 0;
       color: lime;
     }
     .slider-label {
       margin: 0.5rem 0 0 0;
     }
+    .percent-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+      margin-bottom: 1rem;
+    }
+    .percent-buttons button {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      border-radius: 5px;
+    }
+    .trade-buttons {
+      display: flex;
+      flex-direction: row;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1rem;
+    }
+    .trade-buttons button {
+      padding: 1rem 2rem;
+      font-size: 1.2rem;
+    }
+    .profile-buttons {
+      margin: 1rem 0;
+    }
+    .preset-group {
+      margin: 1rem 0;
+    }
   </style>
 </head>
 <body>
   <h1>Arena Photon Trade</h1>
+  <div id="walletInfo">Not connected</div>
+  <div id="clipboard-preview">Clipboard Address: <span id="copiedAddress">None</span></div>
   <input id="customToken" placeholder="Token contract address">
   <input id="amount" placeholder="Amount">
+  <div id="tokenBalanceDisplay">Token Balance: <span id="tokenBalance">0</span></div>
+
+  <div class="trade-buttons">
+    <button onclick="confirmTrade('buy')">BUY NOW</button>
+    <button onclick="confirmTrade('sell')">SELL NOW</button>
+  </div>
+
   <input id="slippage" placeholder="Slippage %" value="2">
+
+  <div class="preset-group">
+    <span>Presets:</span>
+    <button onclick="applyPreset('safe')">Safe</button>
+    <button onclick="applyPreset('fastor')">Fastor</button>
+    <button onclick="applyPreset('fahked')">Fahked</button>
+  </div>
 
   <div class="slider-label">Max Fee (Gwei)</div>
   <input type="range" min="50" max="500" value="200" id="maxFeeSlider">
@@ -48,92 +92,58 @@
   <input type="range" min="1" max="50" value="2" id="priorityFeeSlider">
   <span id="priorityFeeValue">2</span>
 
+  <div class="percent-buttons">
+    <button onclick="setPercent(25)">Buy 25%</button>
+    <button onclick="setPercent(50)">Buy 50%</button>
+    <button onclick="setPercent(75)">Buy 75%</button>
+    <button onclick="setPercent(100)">Buy 100%</button>
+    <button onclick="setSellPercent(5)">Sell 5%</button>
+    <button onclick="setSellPercent(25)">Sell 25%</button>
+    <button onclick="setSellPercent(50)">Sell 50%</button>
+    <button onclick="setSellPercent(75)">Sell 75%</button>
+    <button onclick="setSellPercent(100)">Sell 100%</button>
+  </div>
+
   <button onclick="getQuote('buy')">Preview Buy</button>
   <button onclick="getQuote('sell')">Preview Sell</button>
-  <button onclick="confirmTrade('buy')">Buy Now</button>
-  <button onclick="confirmTrade('sell')">Sell Now</button>
 
   <div id="quoteDisplay">Quote: N/A</div>
   <div id="status"></div>
 
   <script>
-    let provider, signer, userAddress;
-    window.addEventListener('load', async () => {
-      if (window.ethereum) {
-        provider = new ethers.providers.Web3Provider(window.ethereum);
-        await provider.send("eth_requestAccounts", []);
-        signer = provider.getSigner();
-        userAddress = await signer.getAddress();
+    function setGasProfile(type) {
+      let maxFee = 200, priorityFee = 2;
+      if (type === 'safe') {
+        maxFee = 100;
+        priorityFee = 1;
+      } else if (type === 'fast') {
+        maxFee = 300;
+        priorityFee = 5;
+      } else if (type === 'max') {
+        maxFee = 500;
+        priorityFee = 10;
       }
-    });
-
-    document.getElementById("maxFeeSlider").oninput = function() {
-      document.getElementById("maxFeeValue").textContent = this.value;
-    }
-    document.getElementById("priorityFeeSlider").oninput = function() {
-      document.getElementById("priorityFeeValue").textContent = this.value;
-    }
-
-    async function getQuote(type) {
-      const token = document.getElementById("customToken").value.trim();
-      const amount = document.getElementById("amount").value.trim();
-      const slippage = document.getElementById("slippage").value;
-      const src = type === 'buy' ? "0x0000000000000000000000000000000000000000" : token;
-      const dest = type === 'buy' ? token : "0x0000000000000000000000000000000000000000";
-
-      try {
-        const parsedAmount = ethers.utils.parseUnits(amount, 18).toString();
-        const quoteUrl = `https://apiv5.paraswap.io/prices/?srcToken=${src}&destToken=${dest}&amount=${parsedAmount}&side=${type.toUpperCase()}&network=43114&slippage=${slippage}`;
-        const res = await fetch(quoteUrl);
-        const data = await res.json();
-        document.getElementById("quoteDisplay").textContent = `Quote: ${data.destAmount / (10 ** 18)} tokens`;
-      } catch (e) {
-        document.getElementById("quoteDisplay").textContent = `Quote failed`;
-      }
+      document.getElementById('maxFeeSlider').value = maxFee;
+      document.getElementById('priorityFeeSlider').value = priorityFee;
+      document.getElementById("maxFeeValue").textContent = maxFee;
+      document.getElementById("priorityFeeValue").textContent = priorityFee;
     }
 
-    async function confirmTrade(type) {
-      const token = document.getElementById("customToken").value.trim();
-      const amount = document.getElementById("amount").value.trim();
-      const slippage = parseFloat(document.getElementById("slippage").value);
-      const maxFee = document.getElementById("maxFeeSlider").value;
-      const priorityFee = document.getElementById("priorityFeeSlider").value;
-
-      const srcToken = type === 'buy' ? "0x0000000000000000000000000000000000000000" : token;
-      const destToken = type === 'buy' ? token : "0x0000000000000000000000000000000000000000";
-      const srcAmount = ethers.utils.parseUnits(amount, 18).toString();
-
-      try {
-        const txRes = await fetch(`https://apiv5.paraswap.io/transactions/43114`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            srcToken,
-            destToken,
-            srcAmount,
-            slippage,
-            userAddress,
-            partner: "arena-photon"
-          })
-        });
-        const txData = await txRes.json();
-
-        const tx = {
-          to: txData.to,
-          data: txData.data,
-          value: ethers.BigNumber.from(txData.value || 0),
-          gasLimit: ethers.BigNumber.from(500000),
-          maxPriorityFeePerGas: ethers.utils.parseUnits(priorityFee, 'gwei'),
-          maxFeePerGas: ethers.utils.parseUnits(maxFee, 'gwei')
-        };
-
-        const sentTx = await signer.sendTransaction(tx);
-        document.getElementById("status").textContent = `Sent: ${sentTx.hash}`;
-      } catch (err) {
-        document.getElementById("status").textContent = `Error: ${err.message}`;
+    function applyPreset(preset) {
+      let gas, priority, slip;
+      if (preset === 'safe') {
+        gas = 100; priority = 1; slip = 0.5;
+      } else if (preset === 'fastor') {
+        gas = 300; priority = 5; slip = 2;
+      } else if (preset === 'fahked') {
+        gas = 500; priority = 15; slip = 20;
       }
+      document.getElementById('maxFeeSlider').value = gas;
+      document.getElementById('priorityFeeSlider').value = priority;
+      document.getElementById("maxFeeValue").textContent = gas;
+      document.getElementById("priorityFeeValue").textContent = priority;
+      document.getElementById('slippage').value = slip;
     }
   </script>
 </body>
 </html>
-
