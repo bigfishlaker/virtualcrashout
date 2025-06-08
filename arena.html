@@ -66,6 +66,21 @@
       height: 500px;
       max-width: 1000px;
     }
+    .percent-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.3rem;
+    }
+    .percent-buttons button {
+      padding: 0.5rem 1rem;
+      font-size: 0.9rem;
+      border-radius: 5px;
+    }
+    #tokenBalanceDisplay {
+      margin: 0.5rem;
+      font-size: 0.9rem;
+      color: #ff69b4;
+    }
   </style>
 </head>
 <body>
@@ -79,24 +94,32 @@
   </div>
   <div>
     <div id="clipboard-preview">Clipboard Address: <span id="copiedAddress">None</span></div>
-    <select id="tokenList">
-      <option value="">-- Select a token --</option>
-      <option value="0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7">WAVAX</option>
-      <option value="0x130966628846BFd36ff31a822705796e8cb8C18D">MIM</option>
-      <option value="0x60781C2586D68229fde47564546784ab3fACA982">PNG</option>
-    </select><br>
+    <input id="customToken" type="text" placeholder="Paste token contract address">
+    <button onclick="usePastedAddress()">Use Pasted</button>
+    <br>
     <input id="amount" type="number" placeholder="Amount">
-    <button onclick="fillMaxTokenAmount()">Max</button><br>
+    <div id="tokenBalanceDisplay">Token Balance: <span id="tokenBalance">0</span></div>
+    <div class="percent-buttons">
+      <button onclick="setPercent(25)">Buy 25%</button>
+      <button onclick="setPercent(50)">Buy 50%</button>
+      <button onclick="setPercent(75)">Buy 75%</button>
+      <button onclick="setPercent(100)">Buy 100%</button>
+      <button onclick="setSellPercent(5)">Sell 5%</button>
+      <button onclick="setSellPercent(25)">Sell 25%</button>
+      <button onclick="setSellPercent(50)">Sell 50%</button>
+      <button onclick="setSellPercent(75)">Sell 75%</button>
+      <button onclick="setSellPercent(100)">Sell 100%</button>
+    </div>
     <input id="slippage" type="number" value="2" placeholder="Slippage %">
-    <button onclick="buyNow()">Buy Now</button>
-    <button onclick="sellNow()">Sell Now</button>
+    <button onclick="handleBuyNow()">Buy Now</button>
+    <button onclick="handleSellNow()">Sell Now</button>
     <div id="status"></div>
-    <canvas id="chart" width="400" height="200"></canvas>
     <iframe id="dexChart" src="" style="display:none;"></iframe>
+    <iframe id="arenaFrame" src="" style="display:none; width: 100%; height: 600px; border: none; margin-top: 1rem;"></iframe>
   </div>
 
   <script>
-    let provider, signer;
+    let provider, signer, pastedAddress, currentAvaxBalance = 0, userAddress = '', tokenDecimals = 18;
 
     async function checkClipboardForAddress() {
       try {
@@ -104,11 +127,8 @@
         if (permission.state === "granted" || permission.state === "prompt") {
           const text = await navigator.clipboard.readText();
           if (/^0x[a-fA-F0-9]{40}$/.test(text)) {
+            pastedAddress = text;
             document.getElementById("copiedAddress").textContent = text;
-            const url = `https://dexscreener.com/avalanche/${text}`;
-            const iframe = document.getElementById("dexChart");
-            iframe.src = url;
-            iframe.style.display = "block";
           } else {
             document.getElementById("copiedAddress").textContent = "No valid address found";
           }
@@ -118,25 +138,97 @@
       }
     }
 
+    function usePastedAddress() {
+      if (pastedAddress) {
+        document.getElementById("customToken").value = pastedAddress;
+        const iframe = document.getElementById("dexChart");
+        iframe.src = `https://dexscreener.com/avalanche/${pastedAddress}`;
+        iframe.style.display = "block";
+        fetchTokenBalance(pastedAddress);
+      } else {
+        alert("No valid address copied yet");
+      }
+    }
+
+    function handleBuyNow() {
+      const tokenAddress = document.getElementById("customToken").value.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) {
+        alert("Enter valid token address");
+        return;
+      }
+      const arenaURL = `https://arena.trade/avalanche/swap?input=AVAX&output=${tokenAddress}`;
+      const iframe = document.getElementById("arenaFrame");
+      iframe.src = arenaURL;
+      iframe.style.display = "block";
+    }
+
+    function handleSellNow() {
+      const tokenAddress = document.getElementById("customToken").value.trim();
+      if (!/^0x[a-fA-F0-9]{40}$/.test(tokenAddress)) {
+        alert("Enter valid token address");
+        return;
+      }
+      const arenaURL = `https://arena.trade/avalanche/swap?input=${tokenAddress}&output=AVAX`;
+      const iframe = document.getElementById("arenaFrame");
+      iframe.src = arenaURL;
+      iframe.style.display = "block";
+    }
+
+    function setPercent(percent) {
+      if (currentAvaxBalance > 0) {
+        const amt = (currentAvaxBalance * (percent / 100)).toFixed(4);
+        document.getElementById("amount").value = amt;
+      }
+    }
+
+    let currentTokenBalance = 0;
+
+    function setSellPercent(percent) {
+      if (currentTokenBalance > 0) {
+        const sellAmt = (currentTokenBalance * (percent / 100)).toFixed(4);
+        document.getElementById("amount").value = sellAmt;
+      }
+    }
+
+    async function fetchTokenBalance(tokenAddress) {
+      if (!provider || !userAddress) return;
+      const erc20Abi = ["function balanceOf(address) view returns (uint256)", "function decimals() view returns (uint8)"];
+      const contract = new ethers.Contract(tokenAddress, erc20Abi, provider);
+      try {
+        const balanceRaw = await contract.balanceOf(userAddress);
+        const decimals = await contract.decimals();
+        tokenDecimals = decimals;
+        currentTokenBalance = parseFloat(ethers.utils.formatUnits(balanceRaw, decimals));
+        document.getElementById("tokenBalance").textContent = currentTokenBalance.toFixed(4);
+      } catch (err) {
+        console.error("Error fetching token balance:", err);
+      }
+    }
+
     async function connectWallet() {
       if (!window.ethereum) return;
       provider = new ethers.providers.Web3Provider(window.ethereum);
       await provider.send("eth_requestAccounts", []);
       signer = provider.getSigner();
-      const address = await signer.getAddress();
-      const balance = await provider.getBalance(address);
-      const avax = ethers.utils.formatEther(balance);
-      document.getElementById("walletInfo").textContent = `${address.slice(0, 6)}...${address.slice(-4)} | ${avax.slice(0, 6)} AVAX`;
+      userAddress = await signer.getAddress();
+      const balance = await provider.getBalance(userAddress);
+      currentAvaxBalance = parseFloat(ethers.utils.formatEther(balance));
+      document.getElementById("walletInfo").textContent = `${userAddress.slice(0, 6)}...${userAddress.slice(-4)} | ${currentAvaxBalance.toFixed(4)} AVAX`;
     }
 
     function disconnectWallet() {
       signer = null;
       provider = null;
+      currentAvaxBalance = 0;
+      currentTokenBalance = 0;
+      userAddress = '';
       document.getElementById("walletInfo").textContent = "Not connected";
+      document.getElementById("tokenBalance").textContent = "0";
     }
 
     checkClipboardForAddress();
   </script>
 </body>
 </html>
+
 
