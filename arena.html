@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>LAKER BRADY BOT - Arena + Rabby</title>
+  <title>LAKER BRADY BOT - ParaSwap + Rabby</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   <style>
@@ -16,7 +16,7 @@
     h1 {
       text-align: center;
       font-size: 2.2rem;
-      margin-bottom: 2rem;
+      margin-bottom: 1rem;
     }
     .container {
       max-width: 420px;
@@ -25,6 +25,22 @@
       border-radius: 12px;
       padding: 2rem;
       box-shadow: 0 0 16px #000a;
+    }
+    .nav {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .nav a {
+      color: #00e1ff;
+      text-decoration: none;
+      margin: 0 1rem;
+      font-size: 1.1rem;
+      border-bottom: 1px dashed #00e1ff;
+      transition: color 0.2s, border-bottom 0.2s;
+    }
+    .nav a:hover {
+      color: #ff69b4;
+      border-bottom: 1px solid #ff69b4;
     }
     .info {
       margin: 1.2rem 0;
@@ -85,10 +101,61 @@
       background: #00e1ff;
       color: #181818;
     }
+    .gif-container {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .gif-container img {
+      max-width: 100%;
+      border-radius: 12px;
+      box-shadow: 0 0 12px #ff69b4;
+    }
+    #gifOverlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: rgba(0,0,0,0.85);
+      z-index: 9999;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+    }
+    #gifOverlay img {
+      max-width: 90vw;
+      max-height: 60vh;
+      border-radius: 16px;
+      box-shadow: 0 0 24px #ff69b4;
+    }
+    #gifOverlay .overlay-text {
+      color: #ff69b4;
+      font-size: 2rem;
+      margin-top: 1rem;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
+  <div id="gifOverlay">
+    <img 
+      src="https://media.tenor.com/R2C44Dj5NucAAAAd/laker-brady-laker.gif" 
+      alt="Laker Brady Shed Theory Laker GIF"
+    >
+    <div class="overlay-text">LAKER BRADY SWAP!</div>
+  </div>
   <h1>LAKER BRADY BOT</h1>
+  <div class="gif-container">
+    <a href="https://tenor.com/view/laker-brady-shed-theory-laker-laker-joeyy-marlon-dubois-gif-18322437555735161650" target="_blank">
+      <img 
+        src="https://media.tenor.com/R2C44Dj5NucAAAAd/laker-brady-laker.gif" 
+        alt="Laker Brady Shed Theory Laker GIF"
+      >
+    </a>
+  </div>
+  <div class="nav">
+    <a href="index.html">Home</a>
+    <a href="arena.html">Arena Page</a>
+    <a href="products.html">Products</a>
+  </div>
   <div class="container">
     <div id="walletStatus" class="info">Wallet not connected.</div>
     <div id="avaxBalanceDisplay" class="info" style="display:none;">
@@ -211,11 +278,19 @@
       document.getElementById('successMsg').textContent = '';
     }
 
+    function showGifOverlay() {
+      const overlay = document.getElementById('gifOverlay');
+      overlay.style.display = 'flex';
+      setTimeout(() => {
+        overlay.style.display = 'none';
+      }, 3000); // Show for 3 seconds
+    }
+
     document.getElementById('connectBtn').onclick = () => connectWallet(false);
     document.getElementById('rabbyBtn').onclick = () => connectWallet(true);
     document.getElementById('disconnectBtn').onclick = disconnectWallet;
 
-    // Arena Trade Function
+    // ParaSwap Integration
     async function arenaTrade(type) {
       clearError();
       clearSuccess();
@@ -230,7 +305,7 @@
         showError('Please enter both token address and amount.');
         return;
       }
-      // Arena uses 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native AVAX
+      // ParaSwap uses 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE for native AVAX
       const nativeAVAX = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
       let srcToken, destToken, sendValue;
       let amountWei;
@@ -249,29 +324,67 @@
         destToken = nativeAVAX;
         sendValue = 0;
       }
-      // Arena API
-      const url = `https://api.arena.trade/swap?srcToken=${srcToken}&destToken=${destToken}&amount=${amountWei.toString()}&slippage=${slippage}&user=${userAddress}`;
-      showSuccess('Fetching Arena swap data...');
+
+      // 1. Get price quote
+      const quoteUrl = `https://apiv5.paraswap.io/prices/?srcToken=${srcToken}&destToken=${destToken}&amount=${amountWei.toString()}&network=43114&side=${type === 'buy' ? 'BUY' : 'SELL'}&userAddress=${userAddress}&slippage=${slippage}`;
+      showSuccess('Fetching ParaSwap quote...');
+      let quote;
       try {
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data || !data.to || !data.data) {
-          showError('Arena API error or no route found.');
+        const res = await fetch(quoteUrl);
+        quote = await res.json();
+        if (!quote.priceRoute) {
+          showError('ParaSwap: No route found.');
           return;
         }
-        // Send transaction
-        const txParams = {
-          to: data.to,
-          data: data.data,
-          value: data.value ? ethers.BigNumber.from(data.value) : sendValue,
-          gasLimit: data.gas || 300000
-        };
-        showSuccess('Sending transaction...');
-        const tx = await signer.sendTransaction(txParams);
+      } catch (err) {
+        showError('ParaSwap quote failed.');
+        return;
+      }
+
+      // 2. Get transaction data
+      const txUrl = `https://apiv5.paraswap.io/transactions/43114`;
+      const txBody = {
+        srcToken,
+        destToken,
+        srcAmount: amountWei.toString(),
+        userAddress: userAddress,
+        slippage: slippage,
+        priceRoute: quote.priceRoute,
+        deadline: Math.floor(Date.now() / 1000) + 600
+      };
+      showSuccess('Building ParaSwap transaction...');
+      let txData;
+      try {
+        const txRes = await fetch(txUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(txBody)
+        });
+        txData = await txRes.json();
+        if (!txData.to || !txData.data) {
+          showError('ParaSwap: Transaction build failed.');
+          return;
+        }
+      } catch (err) {
+        showError('ParaSwap transaction build failed.');
+        return;
+      }
+
+      // 3. Send transaction
+      try {
+        showSuccess(`Swap sent! TX Hash: <a href="https://snowtrace.io/tx/${txData.hash || ''}" target="_blank" style="color:#00ff99;">${txData.hash || 'View'}</a>`);
+        showGifOverlay();
+        const tx = await signer.sendTransaction({
+          to: txData.to,
+          data: txData.data,
+          value: txData.value ? ethers.BigNumber.from(txData.value) : sendValue,
+          gasLimit: txData.gas || 300000
+        });
         showSuccess(`Swap sent! TX Hash: <a href="https://snowtrace.io/tx/${tx.hash}" target="_blank" style="color:#00ff99;">${tx.hash}</a>`);
+        showGifOverlay();
         await updateAvaxBalance();
       } catch (err) {
-        showError('Arena swap failed: ' + (err.message || err));
+        showError('ParaSwap swap failed: ' + (err.message || err));
       }
     }
   </script>
